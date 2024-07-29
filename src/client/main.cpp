@@ -69,6 +69,10 @@ void readTaskHandler(int clientfd);
 std::string getCurrentTime();
 /* 4. 主聊天页面程序 */
 void mainMenu(int clientfd);
+/* 5. login：处理登录的响应逻辑 */
+void doLoginResponse(json &responsejs);
+/* 6. register：处理注册的相应逻辑 */
+void doRegResponse(json &responsejs);
 
 /* main: 聊天客服端程序实现，main 线程用作发送线程，子线程用作接收线程 */
 int main(int argc, char **argv) {
@@ -155,19 +159,6 @@ int main(int argc, char **argv) {
           isMainMenuRunning = true;
           mainMenu(clientfd);
         }
-         else {
-          char buffer[1024] = {0};
-          len = recv(clientfd, buffer, 1024, 0);
-          if (len == -1) {
-            std::cerr << "Recv login response error..." << std::endl;
-          } else {
-            // 反序列化：解析字符串为 json 对象
-            json responsejs = json::parse(buffer);
-            if (0 != responsejs["error"].get<int>()) { /* 登录失败 */
-              std::cerr << responsejs["errmsg"] << std::endl;
-            } 
-          }
-        }
         break;
       }
       case 2: { /* register 业务 */
@@ -185,7 +176,7 @@ int main(int argc, char **argv) {
         js["password"] = pwd;
         // std::cout << "2:" << name << " " << pwd << std::endl;
         // 账号密码读取的没问题啊
-        std::cout << "Debug: JSON object = " << js << std::endl;
+        // std::cout << "Debug: JSON object = " << js << std::endl;
         /* json 对象序列化成字符串 */
         std::string request = js.dump();
         int len =
@@ -254,6 +245,7 @@ void showCurrentUserData() {
 void readTaskHandler(int clientfd) {
   for (;;) {
     char buffer[1024] = {0};
+    /* 接收服务器发送来的数据 */
     int len = recv(clientfd, buffer, 1024, 0);
     if (-1 == len || 0 == len) { /* 接收数据失败或者接收到空数据 */
       close(clientfd);
@@ -304,9 +296,11 @@ std::string getCurrentTime() {
       std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
   struct tm *ptm = localtime(&tt);
   char date[60] = {0};
+  /* sprintf() 函数是将格式化的数据写入到字符数组 date 中 */
   sprintf(date, "%d-%02d-%02d %02d:%02d:%02d", (int)ptm->tm_year + 1900,
           (int)ptm->tm_mon + 1, (int)ptm->tm_mday, (int)ptm->tm_hour,
           (int)ptm->tm_min, (int)ptm->tm_sec);
+  /* 返回字符串的时间 */
   return std::string(date);
 }
 
@@ -340,7 +334,7 @@ void mainMenu(int clientfd) {
 
 /* 5. login：处理登录的响应逻辑 */
 void doLoginResponse(json &responsejs) {
-  if (0 != responsejs["error"].get<int>()) { /* 登录失败 */
+  if (0 != responsejs["errno"].get<int>()) { /* 登录失败 */
     std::cerr << responsejs["errmsg"] << std::endl;
     g_isLoginSuccess = false;
   } else { /* 登录成功 */

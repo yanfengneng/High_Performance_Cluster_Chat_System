@@ -2,6 +2,7 @@
 #include "public.hpp"
 #include <muduo/base/Logging.h>
 #include <vector>
+#include <iostream>
 
 using namespace muduo;
 
@@ -12,14 +13,19 @@ ChatService* ChatService::instance() {
 }
 
 ChatService::ChatService() {
+  /* 1. 用户基本业务管理相关事件处理回调注册 */
   msgHandlerMap_.insert(
       {LOGIN_MSG, std::bind(&ChatService::login, this, _1, _2, _3)});
+  msgHandlerMap_.insert(
+      {LOGINOUT_MSG, std::bind(&ChatService::loginout, this, _1, _2, _3)});
   msgHandlerMap_.insert(
       {REG_MSG, std::bind(&ChatService::reg, this, _1, _2, _3)});
   msgHandlerMap_.insert(
       {ONE_CHAT_MSG, std::bind(&ChatService::oneChat, this, _1, _2, _3)});
   msgHandlerMap_.insert(
       {ADD_FRIEND_MSG, std::bind(&ChatService::addFriend, this, _1, _2, _3)});
+
+  /* 2. 群组业务管理相关事件处理回调注册 */
   msgHandlerMap_.insert({CREATE_GROUP_MSG, std::bind(&ChatService::createGroup,
                                                      this, _1, _2, _3)});
   msgHandlerMap_.insert(
@@ -51,10 +57,12 @@ MsgHandler ChatService::getHandler(int msgid) {
 /* 处理登录业务：输入 id 和 密码 就行啦！还需要检查下 id 对应的 pwd 是否正确。 */
 void ChatService::login(const TcpConnectionPtr& conn, json& js,
                         Timestamp time) {
+  // std::cout << js << std::endl;
   int id = js["id"].get<int>();
   std::string pwd = js["password"];
 
   User user = userModel_.query(id);
+  // std::cout << js << std::endl;
   if (user.getId() == id && user.getPassword() == pwd) {
     if (user.getState() == "online") {
       json response;
@@ -207,7 +215,7 @@ void ChatService::clineCloseException(const TcpConnectionPtr& conn) {
 void ChatService::oneChat(const TcpConnectionPtr& conn, json& js,
                           Timestamp time) {
   // 获得对方的 id
-  int toid = js["to"].get<int>();
+  int toid = js["toid"].get<int>();
   {
     // 所只要离开作用域就会被析构，释放锁
     std::lock_guard<std::mutex> lock(connMutex_);
@@ -267,8 +275,33 @@ void ChatService::groupChat(const TcpConnectionPtr& conn, json& js, Timestamp ti
       /* 转发消息 */
       it->second->send(js.dump());
     } else {
+      /* 查询 toid 是否在线 */
+      // User user = userModel_.query(id);
+      // if(user.getState() == "online")
       /* 存储离线消息 */
       offlineMsgModel_.insert(id, js.dump());
     }
   }
+}
+
+/* 处理注销业务 */
+void ChatService::loginout(const TcpConnectionPtr& conn, json& js,
+                           Timestamp time) {
+  int userid = js["id"].get<int>();
+  {
+    /* 加锁：增加线程安全 */
+    std::lock_guard<std::mutex> lock(connMutex_);
+    auto it = userConnMap_.find(userid);
+    if (it != userConnMap_.end()) {
+      /* 用户 id 存在于用户通信连接表中，则进行删除 */
+      userConnMap_.erase(it);
+    }
+  }
+
+  // 用户注销，相当于就是下线，在redis中取消订阅通道
+  // _redis.unsubscribe(userid);
+
+  // 更新用户的状态信息
+  User user(userid, "", "", "offline");
+  userModel_.updateState(user);
 }

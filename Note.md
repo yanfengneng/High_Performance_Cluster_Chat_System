@@ -254,6 +254,23 @@ select * from 表名;
 
 
 
+### 数据表中插入中文数据失败
+
+**解决方法：**
+
+```mysql
+# 1. 看目标数据表的编码格式
+SHOW CREATE TABLE 表名；
+
+# 2. 将该表中列名的编码格式设置为 utf-8
+ALTER TABLE 表名 MODIFY 列名 数据类型 CHARACTER SET utf8 非空约束
+
+# example
+ALTER TABLE student MODIFY name VARCHAR(20) CHARACTER SET utf8 NOT NULL 
+```
+
+[mysql数据库使用insert语句插入中文数据报错](https://developer.aliyun.com/article/682436)
+
 ### 3.1.3 设计数据表
 
 在 mysql 服务器上执行 .sql 脚本，来创建数据表：
