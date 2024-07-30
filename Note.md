@@ -12,12 +12,61 @@
   - [3.1 mysql 数据库](#31-mysql-数据库)
     - [3.1.1 修改 root 的密码](#311-修改-root-的密码)
     - [3.1.2 mysql 语法回顾](#312-mysql-语法回顾)
+    - [数据表中插入中文数据失败](#数据表中插入中文数据失败)
     - [3.1.3 设计数据表](#313-设计数据表)
   - [3.2 模块设计](#32-模块设计)
 
 reference：[集群聊天服务器-软件分层设计和高性能服务开发](https://www.bilibili.com/video/BV1114y117Yh)、[课件-提取码: qkng ](https://pan.baidu.com/s/1AQnSgSktA-ZBqIDMik8OvQ?pwd=qkng)
 
 # 一、环境配置
+
+## 1.1 安装 nginx
+
+```bash
+# 2. 解压 nginx 安装包
+#tar -zvxf nginx-1.12.2.tar.gz
+
+# 3. 配置 nginx
+#./configure --with-stream
+
+# 4. 编译并安装在 /usr/local/nginx 目录
+#make && make install
+# 1. 安装 nginx 依赖
+sudo apt-get update
+sudo apt-get install build-essential libpcre3 libpcre3-dev zlib1g zlib1g-dev libssl-dev
+# 以上使用1.12.3版本编译出现问题，直接只用下面的命令来编译安装
+wget http://nginx.org/download/nginx-1.24.0.tar.gz
+tar -zxvf nginx-1.24.0.tar.gz
+cd nginx-1.24.0
+./configure --with-stream
+make
+sudo make install
+```
+
+```nginx
+# nginx tcp loadbalance config
+stream {
+        # 负载均衡模块
+        upstream MyServer{
+                # 服务器名称 服务器ip:端口号 权重=1 max_fails=x fail_timeout=s
+                # 上述权重=1，表示轮询的请求
+                # max_fails=3表示和ChatServer保持心跳机制，超过3次失败表示服务器挂掉了
+                # fail_timeout=30s，响应时间超过30s表示失败了
+                server 127.0.0.1:6000 weight=1 max_fails=3 fail_timeout=30s;
+                server 127.0.0.1:6002 weight=1 max_fails=3 fail_timeout=30s;
+        }
+
+        server{
+                proxy_connect_timeout 1s;
+                # proxy_timeout 3s;
+                listen 8000; # 表示ngnix会监听的端口号
+                proxy_pass MyServer; # 表示标记
+                tcp_nodelay on;
+        }
+}
+```
+
+
 
 参考视频[01-04](https://www.bilibili.com/video/BV1114y117Yh?p=1&vd_source=93d2c7cab25a2966d2b5d0ccf80348c8)
 
@@ -127,6 +176,11 @@ cmake -version
 # 三、项目流程
 
 **补充小知识**：
+
+```bash
+# **查看网络连接和端口使用情况
+sudo netstat -tanp
+```
 
 `sudo netstat -tanp` 是一个用于**查看网络连接和端口使用情况的命令**，具体选项的含义如下：
 
@@ -286,3 +340,4 @@ SOURCE /home/yfn/code/chat/chat.sql;
 
 ## 3.2 模块设计
 
+![image-20240729200137111](Image/业务框架.png)

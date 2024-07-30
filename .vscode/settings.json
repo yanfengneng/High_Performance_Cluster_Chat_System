@@ -63,6 +63,12 @@
     "valarray": "cpp",
     "variant": "cpp",
     "codecvt": "cpp",
-    "iomanip": "cpp"
+    "iomanip": "cpp",
+    "netfwd": "cpp",
+    "any": "cpp",
+    "charconv": "cpp",
+    "csignal": "cpp",
+    "unordered_set": "cpp",
+    "future": "cpp"
   }
 }

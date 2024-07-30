@@ -7,6 +7,7 @@
 #include <mutex>
 #include <unordered_map>
 
+#include "redis.hpp"
 #include "friendmodel.hpp"
 #include "groupmodel.hpp"
 #include "json.hpp"
@@ -47,6 +48,8 @@ class ChatService {
   MsgHandler getHandler(int msgid);
   /* 处理客户端异常退出 */
   void clineCloseException(const TcpConnectionPtr& conn);
+  /* 从 redis 消息队列中获取订阅的消息 */
+  void handleRedisSubscribeMessage(int userid, std::string msg);
 
  private:
   /* 构造函数私有化：禁止外部构造 */
@@ -75,6 +78,9 @@ class ChatService {
   OfflineMsgModel offlineMsgModel_;
   FriendModel friendModel_;
   GroupModel groupModel_;
+
+  // redis 操作对象
+  Redis redis_;
 };
 
 #endif

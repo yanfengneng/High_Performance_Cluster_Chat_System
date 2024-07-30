@@ -185,7 +185,7 @@ int main(int argc, char **argv) {
           std::cerr << "Send reg msg error:" << request << std::endl;
         }
         /* 等待信号量，子线程处理完注册消息会通知 */
-        sem_wait(&rwsem); // P操作
+        sem_wait(&rwsem); // P操作：申请信号量
         // break 在大括号 {} 里面，依旧会跳出 switch 语句
         // 因为大括号只是创建了一个作用域，不会改变 break 的行为。
         // break 语句会跳出包含它最外层的 switch、for、while、do 循环。
@@ -246,7 +246,7 @@ void readTaskHandler(int clientfd) {
   for (;;) {
     char buffer[1024] = {0};
     /* 接收服务器发送来的数据 */
-    int len = recv(clientfd, buffer, 1024, 0);
+    int len = recv(clientfd, buffer, 1024, 0); // 阻塞了
     if (-1 == len || 0 == len) { /* 接收数据失败或者接收到空数据 */
       close(clientfd);
       exit(-1);

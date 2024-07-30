@@ -32,6 +32,12 @@ ChatService::ChatService() {
       {ADD_GROUP_MSG, std::bind(&ChatService::addGroup, this, _1, _2, _3)});
   msgHandlerMap_.insert(
       {GROUP_CHAT_MSG, std::bind(&ChatService::groupChat, this, _1, _2, _3)});
+
+  /* 3. 连接 redis 服务器 */
+  if(redis_.connect()){
+    /* 设置上报消息的回调 */
+    redis_.init_notify_handler(std::bind(&ChatService::handleRedisSubscribeMessage, this, _1, _2));
+  }
 }
 
 /* 服务器异常，业务重置方法 */
@@ -80,6 +86,9 @@ void ChatService::login(const TcpConnectionPtr& conn, json& js,
         std::lock_guard<std::mutex> lock(connMutex_);
         userConnMap_.insert({id, conn});
       }
+
+      // id用户登录成功后，向 redis 订阅 channel(id)
+      redis_.subscribe(id);
 
       // 登录成功：更新用户的状态信息 state：offline => online
       user.setState("online");
@@ -203,6 +212,9 @@ void ChatService::clineCloseException(const TcpConnectionPtr& conn) {
     }
   }
 
+  // 用户注销，相当于就是下线，在 redis 中取消订阅通道
+  redis_.unsubscribe(user.getId());
+
   // 要是没有找到用户信息的话，就不用在数据表中进行操作了
   // 更新用户的状态信息
   if (user.getId() != -1) {
@@ -217,6 +229,7 @@ void ChatService::oneChat(const TcpConnectionPtr& conn, json& js,
   // 获得对方的 id
   int toid = js["toid"].get<int>();
   {
+    /* 该作用域表示用户 A、B 在同一台机器上面 */
     // 所只要离开作用域就会被析构，释放锁
     std::lock_guard<std::mutex> lock(connMutex_);
     auto it = userConnMap_.find(toid);
@@ -227,6 +240,14 @@ void ChatService::oneChat(const TcpConnectionPtr& conn, json& js,
     }
   }
 
+  /* 用户 A、B 不在同一台电脑上登录 */
+  // 查询 toid 是否在线
+  User user = userModel_.query(toid);
+  if (user.getState() == "online") {
+    /* 发布消息 */
+    redis_.publish(toid, js.dump());
+    return;
+  }
   // toid 不在线，存储离线消息
   offlineMsgModel_.insert(toid, js.dump());
 }
@@ -276,10 +297,14 @@ void ChatService::groupChat(const TcpConnectionPtr& conn, json& js, Timestamp ti
       it->second->send(js.dump());
     } else {
       /* 查询 toid 是否在线 */
-      // User user = userModel_.query(id);
-      // if(user.getState() == "online")
-      /* 存储离线消息 */
-      offlineMsgModel_.insert(id, js.dump());
+      User user = userModel_.query(id);
+      if (user.getState() == "online") {
+        /* redis 发布消息 */
+        redis_.publish(id, js.dump());
+      } else {
+        /* 存储离线消息 */
+        offlineMsgModel_.insert(id, js.dump());
+      }
     }
   }
 }
@@ -298,10 +323,22 @@ void ChatService::loginout(const TcpConnectionPtr& conn, json& js,
     }
   }
 
-  // 用户注销，相当于就是下线，在redis中取消订阅通道
-  // _redis.unsubscribe(userid);
+  // 用户注销，相当于就是下线，在 redis 中取消订阅通道
+  redis_.unsubscribe(userid);
 
   // 更新用户的状态信息
   User user(userid, "", "", "offline");
   userModel_.updateState(user);
+}
+
+/* 从redis消息队列中获取订阅的消息 */
+void ChatService::handleRedisSubscribeMessage(int userid, std::string msg) {
+  std::lock_guard<std::mutex> lock(connMutex_);
+  auto it = userConnMap_.find(userid);
+  if (it != userConnMap_.end()) {
+    it->second->send(msg);
+    return;
+  }
+  // 存储该用户的离线消息
+  offlineMsgModel_.insert(userid, msg);
 }
