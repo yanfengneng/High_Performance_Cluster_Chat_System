@@ -8,6 +8,7 @@
   - [Nginx 配置](#nginx-配置)
   - [跨服务器聊天](#跨服务器聊天)
   - [Redis](#redis)
+    - [环境安装](#环境安装)
 - [面试问题](#面试问题)
 
 # 模块设计
@@ -314,6 +315,32 @@ netstat -tanpbash
 
 ## Redis 
 
+### 环境安装
+
+```bash
+# 安装 redis 服务
+sudo apt-get install redis-server
+# 查看 redis 的服务端口
+ps -ef | grep redis
+
+# redis 客户端登录
+redis-cli
+```
+
+`redis-cli` **消息通信演示：**
+
+![image-20240806141011449](Image/redis客户端通信演示.png)
+
+`redis` 的发布-订阅模式包含两种角色，**一是消息的发布者，而是消息的订阅者**。
+
+* 订阅者可以订阅一个或者多个通道 channel，发布者可以向指定的通道 channel 发送消息，所有订阅该通道的订阅者都能收到此消息。
+* 订阅通道的命令是 `subscribe`，可以同时订阅多个通道，用法为 `subscribe channel1 [channel2...]`。**执行订阅命令后，则该客户端处于订阅阻塞状态，等待该 channel 上的消息**。进入订阅状态的客户端，只能使用发布订阅的命令，如 `subscribe`、`unsubscribe`、`psubscribe` 和 `punsubscribe` 这四个发布/订阅命令，否则会报错。
+* 进入订阅状态后客户端可能收到 3 种类型的回复。**每种类型的回复都包含 3 个值，第一个值是消息的类型，根据消类型的不同，第二个和第三个参数的含义可能不同**。`subscribe`:表示订阅成功的反馈信息，第二个值是订阅成功的频道名称，第三个是当前客户端订阅的频道数量；`message`：表示接收到的消息，第二个值表示产生消息的频道名称，第三个值是消息的内容。`unsubscribe`：表示成功取消订阅某个频道。第二个值是对应的频道名称，第三个值是当前客户端订阅的频道数量，当此值为 `0` 时客户端会退出订阅状态，之后就可以执行其他**非"发布/订阅"模式**的命令了。
+
+![image-20240806145549065](Image/redis客户端订阅消息.png)
+
+### 原理解释
+
 **发布-订阅模式的 `Redis` 消息队列**采用的是**观察者模式**的使用场景（观察者模式是用来观察到事件的发生的）。`Redis` 不仅可以作为消息队列，而且可以作为**键值对存储的缓存数据库**，是**基于内存存储数据**的，它的数据也可以**持久化到磁盘上**。
 
 **消息队列是长连接跨服务器聊天的通用方法，工作流程如下**：
@@ -328,6 +355,21 @@ netstat -tanpbash
 ```bash
 redis-server --daemonize yes
 ```
+
+### redis 发布-订阅的客户端编程
+
+`redis` 支持多种不同的客户端编程语言，`java` 对应 `jedis`、`php` 对应 `phpredis`、`c++` 对应 `hiredis`。
+
+```bash
+# 下载安装 hiredis
+git clone https://github.com/redis/hiredis
+cd hiredis
+make # 编译
+sudo make install # 安装用户库目录/usr/local/lib下
+sudo ldconfig /usr/local/lib
+```
+
+
 
 发布订阅功能要开两条 `redis` 连接即两个 `redisContext *`，一条用于订阅和接收消息，一条用于发布消息，这么做的原因是因为订阅  `SUBSCRIBE` 时会进入阻塞状态，代码如下：
 
@@ -371,12 +413,14 @@ bool Redis::subscribe(int channel) {
 }
 ```
 
-本项目使用hiredis进行redis编程,加入redis的发布订阅消息队列后，业务层的改动大致如下：
+本项目使用 `hiredis` 进行 `redis` 编程，加入 `redis` 的发布订阅消息队列后，业务层的改动大致如下：
 
-chatservice构造中连接redis即调用connect,并设置上报消息的回调，connect中会开启一条新线程调用 observer_channel_message函数进行循环接收订阅通道上的消息，有消息到来给业务层上报。
-登录时订阅subscribe channel
-聊天时遇到用户在别的服务器上登录(userid不在map中，但状态为online)就publish
-注销就取消订阅 unsubscribe channel
+* `chatservice` 构造中连接 `redis` 即调用 `connect`，并设置上报消息的回调，`connect` 中会开启一条新线程调用 `observer_channel_message()` 函数进行循环接收订阅通道上的消息，有消息到来给业务层上报。
+* 登录时订阅 `subscribe channel`。
+* 聊天时遇到用户在别的服务器上登录（`userid` 不在 `map` 中，但状态为 `online`）就 `publish`
+* 注销就取消订阅 `unsubscribe channel`。
+
+
 
 `Redis` 的相关考察问题。Kafka 分布式消息队列。
 
