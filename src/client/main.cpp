@@ -74,7 +74,7 @@ void doLoginResponse(json &responsejs);
 /* 6. register：处理注册的相应逻辑 */
 void doRegResponse(json &responsejs);
 
-/* main: 聊天客服端程序实现，main 线程用作发送线程，子线程用作接收线程 */
+/* main: 聊天客户端程序实现，main 线程用作发送线程，子线程用作接收线程 */
 int main(int argc, char **argv) {
   if (argc < 3) {
     std::cerr << "Command invalid! example: ./ChatClient 127.0.0.1 6000"
@@ -115,9 +115,9 @@ int main(int argc, char **argv) {
   /* 在 linux 上相当于底层调用了 pthread_detach() */
   readTask.detach();  // 线程分离
 
-  /* main7. 线程用于接收用于输入，负责发送数据 */
+  /* main7. 主线程用于接收用户输入以及数据的发送 */
   for (;;) {
-    /* 显示首页面菜单 登录、注册、退出 */
+    /* 显示首页面菜单：登录、注册、退出 */
     std::cout << "========================" << std::endl;
     std::cout << "1. login" << std::endl;
     std::cout << "2. register" << std::endl;
@@ -153,8 +153,9 @@ int main(int argc, char **argv) {
           std::cerr << "send login msg error:" << request << std::endl;
         }
         
-        sem_wait(&rwsem); // P操作：等待信号量，由子进程处理完登录的响应消息后，通知这里
-        if(g_isLoginSuccess){
+        // 若没有得到子线程通知就一直阻塞
+        sem_wait(&rwsem); // P操作：等待信号量，由子线程处理完登录的响应消息后，通知这里
+        if(g_isLoginSuccess){// 子线程登录成功后，就开始进入聊天主菜单界面了
           /* 进入聊天主菜单页面 */
           isMainMenuRunning = true;
           mainMenu(clientfd);
@@ -184,7 +185,7 @@ int main(int argc, char **argv) {
         if (len == -1) {
           std::cerr << "Send reg msg error:" << request << std::endl;
         }
-        /* 等待信号量，子线程处理完注册消息会通知 */
+        /* 等待信号量，子线程处理完注册消息会通知主线程 */
         sem_wait(&rwsem); // P操作：申请信号量
         // break 在大括号 {} 里面，依旧会跳出 switch 语句
         // 因为大括号只是创建了一个作用域，不会改变 break 的行为。
@@ -241,11 +242,12 @@ void showCurrentUserData() {
             << std::endl;
 }
 
-/* 2. 接收线程 */
+/* 2. 子线程：用来做接收线程 */
 void readTaskHandler(int clientfd) {
   for (;;) {
     char buffer[1024] = {0};
     /* 接收服务器发送来的数据 */
+    /* 使用子线程进行轮询来接收服务端发送来的数据，并进行相应的处理 */
     int len = recv(clientfd, buffer, 1024, 0); // 阻塞了
     if (-1 == len || 0 == len) { /* 接收数据失败或者接收到空数据 */
       close(clientfd);
@@ -336,7 +338,7 @@ void mainMenu(int clientfd) {
 void doLoginResponse(json &responsejs) {
   if (0 != responsejs["errno"].get<int>()) { /* 登录失败 */
     std::cerr << responsejs["errmsg"] << std::endl;
-    g_isLoginSuccess = false;
+    g_isLoginSuccess = false; // 登录失败
   } else { /* 登录成功 */
     /* 记录当前用户的 id 和 name */
     g_currentUser.setId(responsejs["id"].get<int>());

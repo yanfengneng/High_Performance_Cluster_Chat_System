@@ -8,6 +8,11 @@ using namespace muduo;
 
 /* 获得单例对象的接口函数 */
 ChatService* ChatService::instance() {
+  /* 静态局部变量的懒汉单例模式，是线程安全的 */
+  /**
+   * 静态局部变量只初始化一次，但是可以多次使用，其内存随着作用域的结束不被释放，下次访问时依旧访问到上次的值。
+   * 也就是说静态局部变量只是被保留在该作用域内，但是其生命周期是一直存在的。该局部静态变量是一直存在的，只是只能通过该函数进行访问了。
+   */
   static ChatService service;
   return &service;
 }
@@ -35,7 +40,7 @@ ChatService::ChatService() {
 
   /* 3. 连接 redis 服务器 */
   if(redis_.connect()){
-    /* 设置上报消息的回调 */
+    /* 注册回调函数：设置上报消息的回调 */
     redis_.init_notify_handler(std::bind(&ChatService::handleRedisSubscribeMessage, this, _1, _2));
   }
 }
@@ -87,7 +92,8 @@ void ChatService::login(const TcpConnectionPtr& conn, json& js,
         userConnMap_.insert({id, conn});
       }
 
-      // id用户登录成功后，向 redis 订阅 channel(id)
+      // id 用户登录成功后，向 redis 订阅 channel(id)
+      // 消息都是存储在消息队列中
       redis_.subscribe(id);
 
       // 登录成功：更新用户的状态信息 state：offline => online
@@ -113,7 +119,7 @@ void ChatService::login(const TcpConnectionPtr& conn, json& js,
       std::vector<User> userVec = friendModel_.query(id);
       if(!userVec.empty()){
         std::vector<std::string> vec2;
-        for(auto user: userVec){
+        for(auto user: userVec){/* 将每个用户序列化为字符串 */
           json js;
           js["id"] = user.getId();
           js["name"] = user.getName();
@@ -121,6 +127,7 @@ void ChatService::login(const TcpConnectionPtr& conn, json& js,
           // dump() 函数是将 json 序列化为字符串
           vec2.push_back(js.dump());
         }
+        // friends 存储的是多条字符串，每条字符串对应一个用户
         response["friends"] = vec2;
       }
 
@@ -135,6 +142,7 @@ void ChatService::login(const TcpConnectionPtr& conn, json& js,
           grpjson["groupname"] = group.getName();
           grpjson["groupdesc"] = group.getDesc();
           std::vector<std::string> userV;
+          /* 每组内的每个用户使用字符串进行存储，一个用户对应一个字符串 */
           for (GroupUser& user : group.getUsers()) {
             json js;
             js["id"] = user.getId();
@@ -230,8 +238,12 @@ void ChatService::oneChat(const TcpConnectionPtr& conn, json& js,
   int toid = js["toid"].get<int>();
   {
     /* 该作用域表示用户 A、B 在同一台机器上面 */
-    // 所只要离开作用域就会被析构，释放锁
+    // 锁只要离开作用域就会被析构，释放锁
     std::lock_guard<std::mutex> lock(connMutex_);
+    /**
+     * 在当前 chatserver 查有无当前用户的 id，有的话就直接进行转发消息了。
+     * userConnMap_ 表示用户 A 和用户 B 都在同一台机器上获得连接
+     */
     auto it = userConnMap_.find(toid);
     if (it != userConnMap_.end()) {
       // toid 在线，转发消息：服务器主动推送消息给 toid 用户
@@ -240,11 +252,13 @@ void ChatService::oneChat(const TcpConnectionPtr& conn, json& js,
     }
   }
 
-  /* 用户 A、B 不在同一台电脑上登录 */
+  /**
+   * 用户 A、B 不在同一台电脑上登录，则在数据库表中进行检索，看该 id 的用户是否在线
+   */
   // 查询 toid 是否在线
   User user = userModel_.query(toid);
   if (user.getState() == "online") {
-    /* 发布消息 */
+    /* 发布消息到用户 B 的通道上面 */
     redis_.publish(toid, js.dump());
     return;
   }
@@ -293,9 +307,13 @@ void ChatService::groupChat(const TcpConnectionPtr& conn, json& js, Timestamp ti
   for (int id : useridVec) {
     auto it = userConnMap_.find(id);
     if (it != userConnMap_.end()) {
-      /* 转发消息 */
+      /* 用户 A、B 在同一台电脑上面，直接检索 userConnMap_，然后转发消息 */
       it->second->send(js.dump());
     } else {
+      /**
+       * 用户 A、B 不在同一台电脑上面，则需要在数据库中检索该用户的 id 是否在线。
+       * 若在线，则将消息发布到 redis 消息队列中；若不在线，则存储离线消息。
+       */
       /* 查询 toid 是否在线 */
       User user = userModel_.query(id);
       if (user.getState() == "online") {
@@ -331,14 +349,17 @@ void ChatService::loginout(const TcpConnectionPtr& conn, json& js,
   userModel_.updateState(user);
 }
 
-/* 从redis消息队列中获取订阅的消息 */
+/* 从 redis 消息队列中获取订阅的消息 */
+/* 形参为通道号、消息内容，该函数由 redis 自己进行调用，该用户在哪台服务器登录，哪台服务器就能收到消息 */
+/* 用户登录服务器，就会向 redis 注册一个通道号 */
 void ChatService::handleRedisSubscribeMessage(int userid, std::string msg) {
   std::lock_guard<std::mutex> lock(connMutex_);
+  /* 在当前机器上查询用户是否在线 */
   auto it = userConnMap_.find(userid);
   if (it != userConnMap_.end()) {
     it->second->send(msg);
     return;
   }
-  // 存储该用户的离线消息
+  // A 向通道发送完消息后，然后再通知 B 消息时，B 下线了，此时需要存储该用户 B 的离线消息
   offlineMsgModel_.insert(userid, msg);
 }

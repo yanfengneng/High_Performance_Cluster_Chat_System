@@ -16,7 +16,7 @@ class ChatServer {
   void start();
 
  private:
-  /* 上报链接相关信息的回调函数：链接创建、链接断开 */
+  /* 上报连接相关信息的回调函数：连接创建、连接断开 */
   void onConnection(const TcpConnectionPtr&);
 
   /* 上报读写事件相关信息的回调函数 */

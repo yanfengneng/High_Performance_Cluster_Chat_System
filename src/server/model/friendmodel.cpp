@@ -16,6 +16,8 @@ void FriendModel::insert(int userid, int friendid) {
 std::vector<User> FriendModel::query(int userid) {
   // 1. 组装 sql 语句
   char sql[1024] = {0};
+  // 组合两张表，根据用户号 userid 寻找 user 表中的所有用户信息。
+  // where b.userid = %d 起过滤作用；b.userid = a.id 起联合作用。
   sprintf(sql,
           "select a.id, a.name, a.state from user a inner join friend b on "
           "b.userid = a.id where b.userid = %d;",
